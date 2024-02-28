@@ -1,0 +1,220 @@
+---
+title: "Bass Model"
+author: "Yeva Manukyan"
+date: '2024-02-26'
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(ggplot2)
+library(openxlsx)
+library(diffusion)
+library(patchwork)
+```
+
+# Medivis SurgicalAR and the look alike Head Up Display
+
+In this work, we will be looking at the innovation of Medivis SurgicalAR. This device overlays 3D images onto the patient's body to plan complex procedures and surgeries accurately. The look-alike innovation chosen from the past is the Head Up Display (HUD). Important information is projected directly into the user's eye's view using this technology, commonly onto a transparent screen or surface like a windscreen. Although HUDs were initially developed for military aircraft, they have since been used in several sectors, including the aviation, surgical, and automobile industries.
+
+By providing crucial information to surgeons during procedures without requiring them to take their eyes off the patient, Medivis SurgicalAR's goal is to assist doctors. Medivis Surgical AR aims to improve patient care and make procedures faster, just as HUDs helped make driving and flying safer and more efficient. Examining past HUD implementations might provide valuable information that will help improve Medivis SurgicalAR's usefulness for patients and surgeons.
+
+```{r}
+suppressWarnings({data <- read.xlsx("head_up_display_data.xlsx", 
+                                    rows = 5:17, 
+                                    colNames = TRUE, 
+                                    sheet = 2)
+
+data[, c("Others", "Wearables", "Aviation", "Automotive")] <- sapply(data[, 
+                    c("Others", "Wearables", "Aviation", "Automotive")], as.numeric)
+
+data[is.na(data)] <- 0
+
+data$All <- rowSums(data[, c("Others", "Wearables", "Aviation", "Automotive")], 
+                    na.rm = TRUE)
+
+colnames(data)[1] <- "Year"
+print(data)
+
+})
+```
+
+# Time series data
+
+This is the HUD time series data starting from 2014 - 2023
+The data originally had columns "Others," 'Wearables," "Aviation," and "Automotive," which described the revenue generated from sales of each type. I created a new column, "All," to calculate the overall revenue for each year (in millions of dollars). 
+
+```{r}
+data_long <- tidyr::pivot_longer(data, cols = -Year, 
+                                 names_to = "Category", 
+                                 values_to = "Revenue")
+
+ggplot(data_long, aes(x = as.factor(Year),
+                      y = Revenue, 
+                      fill = Category)) +
+  geom_bar(stat = "identity", 
+           position = "dodge") +
+  labs(title = "Revenue by Category and Year",
+       x = "Year",
+       y = "Revenue",
+       fill = "Category")
+```
+Here, we can see the bar plot for the data for the whole revenue and the revenue by category. We can see that the overall revenue goes up.
+
+```{r}
+bass.f <- function(t,p,q){
+((p+q)^2/p)*exp(-(p+q)*t)/
+(1+(q/p)*exp(-(p+q)*t))^2
+}
+bass.F <- function(t,p,q){
+(1-exp(-(p+q)*t))/
+(1+(q/p)*exp(-(p+q)*t))
+}
+
+cum_ad <-ggplot(data = data, 
+                aes(x = Year)) +
+  stat_function(fun = bass.F, 
+                args = list(p=0.002, q=0.21)) +
+  labs(title = 'HUD Adoption - Cumulative Adoptions') + 
+  theme(
+    axis.text.x = element_text(size = 5),
+    plot.title = element_text(size = 11)
+    
+  )
+
+time_ad<-ggplot(data = data, 
+                aes(x = Year)) +
+  stat_function(fun = bass.f, 
+                args = c(p=0.002, q=0.21)) +
+  labs(title = 'HUD Adoption - Adoptions at Time t') +
+  theme(
+    axis.text.x = element_text(size = 5),
+    plot.title = element_text(size = 11)
+  )
+
+suppressWarnings({
+  plot <- cum_ad + time_ad
+  print(plot)
+})
+```
+
+```{r}
+cum_ad_2 <-ggplot(data = data, 
+                  aes(x = Year)) +
+  stat_function(fun = bass.F, 
+                args = list(p=0.01, q=0.41)) +
+  labs(title = 'HUD Adoption - Cumulative Adoptions') +
+  theme(
+    axis.text.x = element_text(size = 5),
+    plot.title = element_text(size = 11)
+  )
+
+time_ad_2<-ggplot(data = data,
+                  aes(x = Year)) +
+  stat_function(fun = bass.f,
+                args = c(p=0.01, q=0.41)) +
+  labs(title = 'HUD Adoption - Adoptions at Time t')  +
+  theme(
+    axis.text.x = element_text(size = 5),
+    plot.title = element_text(size = 11)
+  )
+
+suppressWarnings({
+  plot_2 <- cum_ad_2 + time_ad_2
+  print(plot_2)
+})
+```
+
+# Predictions of diffusion
+
+```{r}
+diff_m = diffusion(data$All)
+p=round(diff_m$w,4)[1]
+q=round(diff_m$w,4)[2]
+m=round(diff_m$w,4)[3]
+print(diff_m)
+```
+
+```{r}
+suppressWarnings({sales = data$All
+t = 1:length(sales)
+bass_m = nls(sales ~ m*(((p+q)**2/p)*exp(-(p+q)*t))/
+               (1+(q/p)*exp(-(p+q)*t))**2,
+             start=c(list(m=sum(sales),p=0.02,q=0.4)),
+             control=nls.control(maxiter = 150, 
+                                 minFactor = 1/1024, 
+                                 printEval = TRUE, 
+                                 warnOnly = TRUE))
+print(bass_m)
+})
+```
+
+```{r}
+p <- 1.551e-03
+q<-1.147e-01 
+m<-2.780e+05
+
+suppressWarnings({data$Pred_sales = bass.f(1:12, 
+                                           p = p,
+                                           q = q)*m
+ggplot(data = data, 
+       aes(x = Year,
+           y = All)) +
+  geom_bar(stat = 'identity') +
+  geom_point(mapping = aes(x=Year, 
+                           y=Pred_sales), 
+             color = 'blue')
+})
+```
+The plot visualizes the difference between the estimated and actual revenue generated by sales. This shows that the prediction is not very good.
+
+# Prediction for the next 50 years
+
+```{r}
+innovation_predicted <- bass.f(1:61, 
+                               p = p,
+                               q = q) * m
+years <- seq(from = 2014, 
+             to = 2025 + 49,
+             by = 1)
+
+innovation_data <- data.frame(Year = years, 
+                              Sales = innovation_predicted)
+
+ggplot(data = innovation_data, 
+       aes(x = Year,
+           y = Sales)) +
+  geom_bar(stat='identity',
+           fill = 'red') + ylab("Sales in million $")
+
+```
+
+We can see that the sales go up throughout the time. However, at some point they start declining due to market glut.
+
+# Estimate of the number of adopters by period
+
+```{r}
+ad_by_period <- numeric(length(1:61))
+cumulative_ad <- 0
+for (i in 1:61) {
+  new_adopters <- (p + (q * cumulative_ad / m)) * (m - cumulative_ad)
+  ad_by_period[i] <- new_adopters
+  cumulative_ad <- cumulative_ad + new_adopters
+}
+
+adoption_df<- data.frame(Year = seq(from = 2014, 
+                                    to = 2014 + length(1:61) - 1),
+                         New_Adopters = ad_by_period,
+                         Market_Percentage = ad_by_period / m * 100)
+
+print(adoption_df)
+```
+
+
+# Reference
+
+Laricchia, F. (2022, February 14). US head-up display market by application 2014-2025. Statista. https://www.statista.com/statistics/781813/head-up-display-market-size-in-the-us-by-application/ 
